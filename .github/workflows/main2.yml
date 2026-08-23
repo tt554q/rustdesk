@@ -1,11 +1,11 @@
-name: Ubuntu-Old
+name: Ubuntu-2204
 
 on:
   workflow_dispatch:
 
 jobs:
   ubuntu:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 360
 
     steps:
@@ -29,7 +29,7 @@ jobs:
 
       - name: Connect Tailscale
         run: |
-          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=ubuntu-old-$GITHUB_RUN_ID
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=ubuntu2204-$GITHUB_RUN_ID
           IP=""
           for i in $(seq 1 10); do
             IP=$(sudo tailscale ip -4 2>/dev/null | head -n1)
