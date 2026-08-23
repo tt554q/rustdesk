@@ -1,0 +1,62 @@
+name: Ubuntu-Old
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ubuntu:
+    runs-on: ubuntu-20.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Setup Ubuntu Access
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xrdp xfce4 xfce4-goodies tailscale curl sudo netcat-openbsd
+
+          sudo useradd -m -s /bin/bash admin
+          echo 'admin:26121991@M' | sudo chpasswd
+          sudo usermod -aG sudo admin
+
+          echo 'xfce4-session' | sudo tee /home/admin/.xsession > /dev/null
+          sudo chown admin:admin /home/admin/.xsession
+
+          sudo sed -i 's/^port=.*/port=3389/' /etc/xrdp/xrdp.ini
+          sudo service xrdp start
+
+          sudo tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock &
+          sleep 5
+
+      - name: Connect Tailscale
+        run: |
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=ubuntu-old-$GITHUB_RUN_ID
+          IP=""
+          for i in $(seq 1 10); do
+            IP=$(sudo tailscale ip -4 2>/dev/null | head -n1)
+            [ -n "$IP" ] && break
+            sleep 5
+          done
+          if [ -z "$IP" ]; then exit 1; fi
+          echo "NODE_IP=$IP" >> $GITHUB_ENV
+
+      - name: Verify Access
+        run: |
+          echo "Ubuntu IP: $NODE_IP"
+          nc -zv $NODE_IP 3389
+          if [ $? -ne 0 ]; then exit 1; fi
+          echo "RDP ready"
+
+      - name: Hold Session
+        run: |
+          echo ""
+          echo "=== ACCESS ==="
+          echo "Address: $NODE_IP"
+          echo "Username: admin"
+          echo "Password: 26121991@M"
+          echo "Port: 3389"
+          echo "==============="
+          echo ""
+          while true; do
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Ubuntu active on $NODE_IP:3389"
+            sleep 60
+          done
