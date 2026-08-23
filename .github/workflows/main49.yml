@@ -1,0 +1,66 @@
+name: Docker-Container-RDP-6H
+
+on:
+  workflow_dispatch:
+
+jobs:
+  docker-rdp:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:22.04
+      options: --privileged
+    timeout-minutes: 360
+
+    steps:
+      - name: Setup Container Access
+        run: |
+          apt-get update
+          apt-get install -y xrdp xfce4 xfce4-goodies curl sudo netcat-openbsd
+          curl -fsSL https://tailscale.com/install.sh | sh
+
+          useradd -m -s /bin/bash admin
+          echo 'admin:26121991@M' | chpasswd
+          usermod -aG sudo admin
+
+          echo 'xfce4-session' > /home/admin/.xsession
+          chown admin:admin /home/admin/.xsession
+
+          sed -i 's/^port=.*/port=3389/' /etc/xrdp/xrdp.ini
+          service xrdp start
+
+          tailscaled --tun=userspace-networking --socks5-server=localhost:1055 &
+          sleep 5
+
+      - name: Connect Tailscale
+        run: |
+          tailscale up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=docker-$GITHUB_RUN_ID
+          IP=""
+          for i in $(seq 1 10); do
+            IP=$(tailscale ip -4 2>/dev/null | head -n1)
+            [ -n "$IP" ] && break
+            sleep 5
+          done
+          if [ -z "$IP" ]; then exit 1; fi
+          echo "NODE_IP=$IP" >> $GITHUB_ENV
+
+      - name: Verify Access
+        run: |
+          echo "Container IP: $NODE_IP"
+          nc -zv $NODE_IP 3389
+          if [ $? -ne 0 ]; then exit 1; fi
+          echo "RDP ready"
+
+      - name: Hold Session
+        run: |
+          echo ""
+          echo "=== ACCESS ==="
+          echo "Address: $NODE_IP"
+          echo "Username: admin"
+          echo "Password: 26121991@M"
+          echo "Port: 3389"
+          echo "==============="
+          echo ""
+          while true; do
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Docker active on $NODE_IP:3389"
+            sleep 60
+          done
